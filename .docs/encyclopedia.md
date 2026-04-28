@@ -93,7 +93,7 @@ The live backend agent implementation and its event stream. The main service is 
 
 #### Provider
 
-The backend agent runtime that actually performs work. See [ProviderService.ts][14], [ProviderAdapter.ts][15], and [CodexAdapter.ts][17].
+The backend agent runtime that actually performs work. See [ProviderService.ts][14], [ProviderAdapter.ts][15], and provider-specific adapters like [CodexAdapter.ts][17] and [GeminiAdapter.ts][25].
 
 #### Session
 
@@ -178,3 +178,4 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../apps/server/src/checkpointing/Utils.ts
 [23]: ../apps/server/src/checkpointing/Diffs.ts
 [24]: ./architecture.md
+[25]: ../apps/server/src/provider/Layers/GeminiAdapter.ts

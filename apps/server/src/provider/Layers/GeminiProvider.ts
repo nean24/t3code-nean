@@ -184,9 +184,7 @@ export const checkGeminiProviderStatus: Effect.Effect<
   }
 
   const versionResult = versionProbe.success.value;
-  const parsedVersion = parseGenericCliVersion(
-    `${versionResult.stdout}\n${versionResult.stderr}`,
-  );
+  const parsedVersion = parseGenericCliVersion(`${versionResult.stdout}\n${versionResult.stderr}`);
 
   if (versionResult.code !== 0) {
     return buildServerProvider({

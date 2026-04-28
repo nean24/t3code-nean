@@ -133,7 +133,10 @@ export function parseGeminiStreamLines(
 // Mapping
 // ---------------------------------------------------------------------------
 
-function makeBase(threadId: ThreadId, turnIdStr?: string): {
+function makeBase(
+  threadId: ThreadId,
+  turnIdStr?: string,
+): {
   readonly eventId: EventId;
   readonly provider: "gemini";
   readonly threadId: ThreadId;

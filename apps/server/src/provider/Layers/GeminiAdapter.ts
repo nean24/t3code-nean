@@ -85,7 +85,9 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* () {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
-  const getRuntime = (threadId: ThreadId): Effect.Effect<GeminiSessionRuntimeShape, ProviderAdapterError> =>
+  const getRuntime = (
+    threadId: ThreadId,
+  ): Effect.Effect<GeminiSessionRuntimeShape, ProviderAdapterError> =>
     Ref.get(sessionsRef).pipe(
       Effect.flatMap((sessions) => {
         const runtime = sessions.get(threadId);
@@ -132,15 +134,16 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* () {
         );
 
         // Register runtime and add its event stream.
-        yield* Ref.update(sessionsRef, (sessions) =>
-          new Map([...sessions, [input.threadId, runtime]]),
+        yield* Ref.update(
+          sessionsRef,
+          (sessions) => new Map([...sessions, [input.threadId, runtime]]),
         );
         yield* Ref.update(sessionEventsRef, (streams) => [...streams, runtime.events]);
 
         // Start the session and transition to ready.
-        const session = yield* runtime.start().pipe(
-          Effect.mapError((err) => mapRuntimeError(input.threadId, "startSession", err)),
-        );
+        const session = yield* runtime
+          .start()
+          .pipe(Effect.mapError((err) => mapRuntimeError(input.threadId, "startSession", err)));
 
         return session;
       }),
@@ -201,11 +204,9 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* () {
     listSessions: () =>
       Ref.get(sessionsRef).pipe(
         Effect.flatMap((sessions) =>
-          Effect.forEach(
-            Array.from(sessions.values()),
-            (runtime) => runtime.getSession,
-            { concurrency: "unbounded" },
-          ),
+          Effect.forEach(Array.from(sessions.values()), (runtime) => runtime.getSession, {
+            concurrency: "unbounded",
+          }),
         ),
         Effect.map((sessions): ReadonlyArray<ProviderSession> => sessions),
       ),

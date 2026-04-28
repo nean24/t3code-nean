@@ -106,27 +106,30 @@ it.layer(
   );
 });
 
-it.layer(
-  makeTestLayer(failingSpawnerLayer("spawn gemini ENOENT")),
-)("GeminiProviderLive – binary not found", (it) => {
-  it.effect("returns error status when gemini binary is missing", () =>
-    Effect.gen(function* () {
-      const provider = yield* GeminiProvider;
-      const snapshot = yield* provider.refresh;
+it.layer(makeTestLayer(failingSpawnerLayer("spawn gemini ENOENT")))(
+  "GeminiProviderLive – binary not found",
+  (it) => {
+    it.effect("returns error status when gemini binary is missing", () =>
+      Effect.gen(function* () {
+        const provider = yield* GeminiProvider;
+        const snapshot = yield* provider.refresh;
 
-      assert.equal(snapshot.provider, "gemini");
-      assert.equal(snapshot.installed, false);
-      assert.equal(snapshot.status, "error");
-      assert.ok(snapshot.message?.toLowerCase().includes("gemini"), `unexpected message: ${snapshot.message}`);
-    }),
-  );
-});
+        assert.equal(snapshot.provider, "gemini");
+        assert.equal(snapshot.installed, false);
+        assert.equal(snapshot.status, "error");
+        assert.ok(
+          snapshot.message?.toLowerCase().includes("gemini"),
+          `unexpected message: ${snapshot.message}`,
+        );
+      }),
+    );
+  },
+);
 
 it.layer(
-  makeTestLayer(
-    mockSpawnerLayer({ stdout: "", stderr: "", code: 0 }),
-    { providers: { gemini: { enabled: false } } },
-  ),
+  makeTestLayer(mockSpawnerLayer({ stdout: "", stderr: "", code: 0 }), {
+    providers: { gemini: { enabled: false } },
+  }),
 )("GeminiProviderLive – disabled", (it) => {
   it.effect("returns disabled status when gemini is turned off in settings", () =>
     Effect.gen(function* () {
@@ -141,10 +144,9 @@ it.layer(
 });
 
 it.layer(
-  makeTestLayer(
-    mockSpawnerLayer({ stdout: "Google Gemini CLI 0.1.5\n", stderr: "", code: 0 }),
-    { providers: { gemini: { customModels: ["gemini-custom-test"] } } },
-  ),
+  makeTestLayer(mockSpawnerLayer({ stdout: "Google Gemini CLI 0.1.5\n", stderr: "", code: 0 }), {
+    providers: { gemini: { customModels: ["gemini-custom-test"] } },
+  }),
 )("GeminiProviderLive – custom models", (it) => {
   it.effect("includes custom model slugs from settings", () =>
     Effect.gen(function* () {

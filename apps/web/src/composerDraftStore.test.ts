@@ -1119,8 +1119,7 @@ describe("composerDraftStore modelSelection", () => {
         .options,
     );
     expect(draft?.modelSelectionByProvider.gemini?.options).toEqual(
-      createModelSelection("gemini", "gemini-2.5-pro", toSelections({ safety: "none" }))
-        .options,
+      createModelSelection("gemini", "gemini-2.5-pro", toSelections({ safety: "none" })).options,
     );
   });
 

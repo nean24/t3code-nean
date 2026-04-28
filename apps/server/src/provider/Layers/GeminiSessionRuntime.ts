@@ -202,7 +202,9 @@ export const makeGeminiSessionRuntime = (
     const emitEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
       Queue.offer(eventsQueue, event).pipe(Effect.asVoid);
 
-    const emitSessionStateChanged = (state: "starting" | "ready" | "stopped"): Effect.Effect<void> =>
+    const emitSessionStateChanged = (
+      state: "starting" | "ready" | "stopped",
+    ): Effect.Effect<void> =>
       emitEvent({
         eventId: makeEventId(),
         provider: PROVIDER,
@@ -285,7 +287,10 @@ export const makeGeminiSessionRuntime = (
         }));
 
         // Write the prompt to stdin.
-        yield* writeToStdin(childHandle.stdin as Parameters<typeof Stream.run>[1], `${input.text}\n`);
+        yield* writeToStdin(
+          childHandle.stdin as Parameters<typeof Stream.run>[1],
+          `${input.text}\n`,
+        );
 
         return {
           threadId: options.threadId,
@@ -343,9 +348,7 @@ export const makeGeminiSessionRuntime = (
       _requestId: ApprovalRequestId,
       answers: ProviderUserInputAnswers,
     ): Effect.Effect<void, GeminiSessionRuntimeError> => {
-      const firstAnswer = Object.values(answers).find(
-        (v): v is string => typeof v === "string",
-      );
+      const firstAnswer = Object.values(answers).find((v): v is string => typeof v === "string");
       if (!firstAnswer) return Effect.void;
       return writeToStdin(
         childHandle.stdin as Parameters<typeof Stream.run>[1],

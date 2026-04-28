@@ -274,12 +274,7 @@ describe("parseGeminiStreamLines", () => {
   });
 
   it("skips blank and non-JSON lines", () => {
-    const lines = [
-      "",
-      "   ",
-      "not json",
-      JSON.stringify({ type: "content", text: "world" }),
-    ];
+    const lines = ["", "   ", "not json", JSON.stringify({ type: "content", text: "world" })];
     const events = parseGeminiStreamLines(threadId, lines);
     assert.equal(events.length, 1);
     assert.equal(events[0]!.type, "content.delta");
