@@ -10,10 +10,12 @@ import { ServerConfig } from "../../config.ts";
 import { ClaudeProviderLive } from "./ClaudeProvider.ts";
 import { CodexProviderLive } from "./CodexProvider.ts";
 import { CursorProviderLive } from "./CursorProvider.ts";
+import { GeminiProviderLive } from "./GeminiProvider.ts";
 import { OpenCodeProviderLive } from "./OpenCodeProvider.ts";
 import { ClaudeProvider } from "../Services/ClaudeProvider.ts";
 import { CodexProvider } from "../Services/CodexProvider.ts";
 import { CursorProvider } from "../Services/CursorProvider.ts";
+import { GeminiProvider } from "../Services/GeminiProvider.ts";
 import { OpenCodeProvider } from "../Services/OpenCodeProvider.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
@@ -83,6 +85,7 @@ const ProviderRegistryLiveBase = Layer.effect(
     const codexProvider = yield* CodexProvider;
     const claudeProvider = yield* ClaudeProvider;
     const openCodeProvider = yield* OpenCodeProvider;
+    const geminiProvider = yield* GeminiProvider;
     const config = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -94,6 +97,7 @@ const ProviderRegistryLiveBase = Layer.effect(
       claudeAgent: claudeProvider,
       opencode: openCodeProvider,
       cursor: cursorProvider,
+      gemini: geminiProvider,
     }) satisfies ReadonlyArray<ProviderSnapshotSource>;
     const activeProviders = PROVIDER_CACHE_IDS;
     const changesPubSub = yield* Effect.acquireRelease(
@@ -258,6 +262,7 @@ export const ProviderRegistryLive = Layer.unwrap(
       Layer.provideMerge(CursorProviderLive),
       Layer.provideMerge(CodexProviderLive),
       Layer.provideMerge(ClaudeProviderLive),
+      Layer.provideMerge(GeminiProviderLive),
       Layer.provideMerge(OpenCodeProviderLive),
       Layer.provideMerge(OpenCodeRuntimeLive),
     ),

@@ -42,11 +42,14 @@ class OpenCodeTextGen extends Context.Service<OpenCodeTextGen, TextGenerationSha
 // ---------------------------------------------------------------------------
 
 const makeRoutingTextGeneration = Effect.gen(function* () {
+  const codexGen = yield* CodexTextGen;
   const byProvider = {
-    codex: yield* CodexTextGen,
+    codex: codexGen,
     claudeAgent: yield* ClaudeTextGen,
     cursor: yield* CursorTextGen,
     opencode: yield* OpenCodeTextGen,
+    // Gemini text generation falls back to Codex until a native implementation is added.
+    gemini: codexGen,
   };
 
   return {

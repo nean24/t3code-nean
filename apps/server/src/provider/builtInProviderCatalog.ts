@@ -16,6 +16,7 @@ type BuiltInAdapterMap = {
   readonly codex: ProviderAdapterShape<ProviderAdapterError>;
   readonly claudeAgent: ProviderAdapterShape<ProviderAdapterError>;
   readonly opencode: ProviderAdapterShape<ProviderAdapterError>;
+  readonly gemini: ProviderAdapterShape<ProviderAdapterError>;
   readonly cursor?: ProviderAdapterShape<ProviderAdapterError>;
 };
 
@@ -24,6 +25,7 @@ export const BUILT_IN_PROVIDER_ORDER = [
   "claudeAgent",
   "opencode",
   "cursor",
+  "gemini",
 ] as const satisfies ReadonlyArray<ProviderKind>;
 
 export function createBuiltInProviderSources(
@@ -45,5 +47,6 @@ export function createBuiltInAdapterList(
     adapters.claudeAgent,
     adapters.opencode,
     ...(adapters.cursor ? [adapters.cursor] : []),
+    adapters.gemini,
   ];
 }
