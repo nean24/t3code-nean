@@ -23,4 +23,4 @@ __screenshots__/
 .tanstack
 squashfs-root/
 .worktrees/
-docs/
+.docs/
