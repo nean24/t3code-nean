@@ -143,7 +143,7 @@ function makeEventId(): EventId {
 const writeToStdin = (stdin: any, text: string): Effect.Effect<void> => {
   const bytes = new TextEncoder().encode(text);
   // Stream.run returns Effect<R,E,A> — we just want void here.
-  return (Stream.make(bytes).pipe(Stream.run(stdin)) as Effect.Effect<unknown>).pipe(
+  return (Stream.make(bytes).pipe(Stream.run(stdin)) as Effect.Effect<void, never, never>).pipe(
     Effect.asVoid,
     Effect.ignore,
   );

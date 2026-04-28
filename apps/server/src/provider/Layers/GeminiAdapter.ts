@@ -17,7 +17,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Effect, Layer, Ref, Stream } from "effect";
+import { Effect, Layer, Ref, Stream, Queue, Fiber, Scope, Exit } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -72,16 +72,23 @@ function notFound(threadId: ThreadId): ProviderAdapterError {
 // Adapter factory
 // ---------------------------------------------------------------------------
 
+interface GeminiAdapterSessionContext {
+  readonly threadId: ThreadId;
+  readonly scope: Scope.Closeable;
+  readonly runtime: GeminiSessionRuntimeShape;
+  readonly eventFiber: Fiber.Fiber<void, never>;
+  stopped: boolean;
+}
+
 const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* () {
   const serverSettingsService = yield* ServerSettingsService;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
   // Per-thread runtime map.
-  const sessionsRef = yield* Ref.make<Map<ThreadId, GeminiSessionRuntimeShape>>(new Map());
+  const sessionsRef = yield* Ref.make<Map<ThreadId, GeminiAdapterSessionContext>>(new Map());
 
-  // Shared event stream: merge events from all runtime instances.
-  // We maintain a list of per-session streams and combine them.
-  const sessionEventsRef = yield* Ref.make<ReadonlyArray<Stream.Stream<ProviderRuntimeEvent>>>([]);
+  // Shared event queue for all sessions.
+  const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -90,8 +97,8 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* () {
   ): Effect.Effect<GeminiSessionRuntimeShape, ProviderAdapterError> =>
     Ref.get(sessionsRef).pipe(
       Effect.flatMap((sessions) => {
-        const runtime = sessions.get(threadId);
-        return runtime ? Effect.succeed(runtime) : Effect.fail(notFound(threadId));
+        const session = sessions.get(threadId);
+        return session && !session.stopped ? Effect.succeed(session.runtime) : Effect.fail(notFound(threadId));
       }),
     );
 
@@ -127,18 +134,32 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* () {
           ...(resumeCursor !== undefined ? { resumeCursor } : {}),
         } satisfies import("./GeminiSessionRuntime.ts").GeminiSessionRuntimeOptions;
 
+        const sessionScope = yield* Scope.make();
         const runtime = yield* makeGeminiSessionRuntime(runtimeOptions).pipe(
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
           Effect.mapError((err) => mapRuntimeError(input.threadId, "startSession", err)),
-          Effect.scoped,
+          Effect.provideService(Scope.Scope, sessionScope),
         );
 
-        // Register runtime and add its event stream.
+        // Fork a fiber to pipe events into the shared queue
+        const eventFiber = yield* runtime.events.pipe(
+          Stream.runForEach((event) => Queue.offer(runtimeEventQueue, event)),
+          Effect.forkIn(sessionScope),
+        );
+
+        const sessionContext: GeminiAdapterSessionContext = {
+          threadId: input.threadId,
+          scope: sessionScope,
+          runtime,
+          eventFiber,
+          stopped: false,
+        };
+
+        // Register runtime
         yield* Ref.update(
           sessionsRef,
-          (sessions) => new Map([...sessions, [input.threadId, runtime]]),
+          (sessions) => new Map([...sessions, [input.threadId, sessionContext]]),
         );
-        yield* Ref.update(sessionEventsRef, (streams) => [...streams, runtime.events]);
 
         // Start the session and transition to ready.
         const session = yield* runtime
@@ -190,29 +211,38 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* () {
     stopSession: (threadId) =>
       Effect.gen(function* () {
         const sessions = yield* Ref.get(sessionsRef);
-        const runtime = sessions.get(threadId);
-        if (!runtime) return;
+        const session = sessions.get(threadId);
+        if (!session || session.stopped) return;
 
-        yield* runtime.close.pipe(Effect.ignore);
+        session.stopped = true;
         yield* Ref.update(sessionsRef, (map) => {
           const next = new Map(map);
           next.delete(threadId);
           return next;
         });
+
+        yield* session.runtime.close.pipe(Effect.ignore);
+        yield* Effect.ignore(Scope.close(session.scope, Exit.void));
+        yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);
       }),
 
     listSessions: () =>
       Ref.get(sessionsRef).pipe(
         Effect.flatMap((sessions) =>
-          Effect.forEach(Array.from(sessions.values()), (runtime) => runtime.getSession, {
-            concurrency: "unbounded",
-          }),
+          Effect.forEach(
+            Array.from(sessions.values()).filter((s) => !s.stopped),
+            (session) => session.runtime.getSession,
+            { concurrency: "unbounded" },
+          ),
         ),
         Effect.map((sessions): ReadonlyArray<ProviderSession> => sessions),
       ),
 
     hasSession: (threadId) =>
-      Ref.get(sessionsRef).pipe(Effect.map((sessions) => sessions.has(threadId))),
+      Ref.get(sessionsRef).pipe(Effect.map((sessions) => {
+        const session = sessions.get(threadId);
+        return session !== undefined && !session.stopped;
+      })),
 
     readThread: (threadId) =>
       Effect.fail(
@@ -238,24 +268,29 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* () {
       Effect.gen(function* () {
         const sessions = yield* Ref.get(sessionsRef);
         yield* Effect.forEach(
-          Array.from(sessions.values()),
-          (runtime) => runtime.close.pipe(Effect.ignore),
+          Array.from(sessions.values()).filter((s) => !s.stopped),
+          (session) => Effect.gen(function* () {
+            session.stopped = true;
+            yield* session.runtime.close.pipe(Effect.ignore);
+            yield* Effect.ignore(Scope.close(session.scope, Exit.void));
+            yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);
+          }),
           { concurrency: "unbounded", discard: true },
         );
         yield* Ref.set(sessionsRef, new Map());
       }),
 
     get streamEvents(): Stream.Stream<ProviderRuntimeEvent> {
-      // Return a stream that merges events from all current active sessions.
-      // We use a flat-mapped approach: read the current set of streams each
-      // time the outer stream is subscribed to and merge them together.
-      return Stream.fromEffect(Ref.get(sessionEventsRef)).pipe(
-        Stream.flatMap((streams) =>
-          streams.length === 0 ? Stream.empty : Stream.mergeAll(streams, { concurrency: 64 }),
-        ),
-      );
+      return Stream.fromQueue(runtimeEventQueue);
     },
   };
+
+  yield* Effect.acquireRelease(Effect.void, () =>
+    adapter.stopAll().pipe(
+      Effect.andThen(Queue.shutdown(runtimeEventQueue)),
+      Effect.ignore,
+    ),
+  );
 
   return adapter;
 });
