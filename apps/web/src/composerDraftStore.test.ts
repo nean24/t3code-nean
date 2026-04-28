@@ -1103,10 +1103,11 @@ describe("composerDraftStore modelSelection", () => {
       providerModelOptions({
         codex: { fastMode: true },
         claudeAgent: { effort: "max" },
+        gemini: { safety: "none" },
       }),
     );
 
-    // Now set options for only codex — claudeAgent should be untouched
+    // Now set options for only codex — claudeAgent and gemini should be untouched
     store.setModelOptions(threadRef, providerModelOptions({ codex: { reasoningEffort: "xhigh" } }));
 
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID);
@@ -1115,6 +1116,10 @@ describe("composerDraftStore modelSelection", () => {
     );
     expect(draft?.modelSelectionByProvider.claudeAgent?.options).toEqual(
       createModelSelection("claudeAgent", "claude-opus-4-6", toSelections({ effort: "max" }))
+        .options,
+    );
+    expect(draft?.modelSelectionByProvider.gemini?.options).toEqual(
+      createModelSelection("gemini", "gemini-2.5-pro", toSelections({ safety: "none" }))
         .options,
     );
   });

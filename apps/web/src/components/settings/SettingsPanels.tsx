@@ -149,6 +149,12 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     serverPasswordDescription:
       "If your OpenCode server requires authentication, enter the password here. NOTE: Stored in plain text on disk",
   },
+  {
+    provider: "gemini",
+    title: "Gemini",
+    binaryPlaceholder: "Gemini CLI binary path",
+    binaryDescription: "Path to the gemini CLI binary",
+  },
 ] as const;
 
 const PROVIDER_STATUS_STYLES = {
