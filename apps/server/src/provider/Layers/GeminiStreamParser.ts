@@ -17,7 +17,8 @@ import {
   type CanonicalItemType,
   type ProviderRuntimeEvent,
   type ThreadId,
-  TurnId,
+  type TurnId,
+  ProviderItemId,
 } from "@t3tools/contracts";
 
 const PROVIDER = "gemini" as const;
@@ -26,36 +27,35 @@ const PROVIDER = "gemini" as const;
 // Raw Gemini stream-json event types
 // ---------------------------------------------------------------------------
 
-/**
- * Subset of Gemini CLI stream-json event types we handle.
- * Unknown types fall through to a no-op.
- */
 type GeminiStreamEventType =
-  | "content"
-  | "tool_call"
+  | "init"
+  | "message"
+  | "tool_use"
   | "tool_result"
-  | "turn_start"
-  | "turn_end"
-  | "error"
-  | "session_start"
-  | "session_end"
-  | "approval_request"
-  | "approval_response";
+  | "result";
 
 interface GeminiStreamEvent {
   readonly type: GeminiStreamEventType | string;
-  readonly text?: string;
-  readonly tool?: string;
-  readonly status?: string;
-  readonly input?: unknown;
-  readonly output?: string;
-  readonly error?: string;
-  readonly requestId?: string;
-  readonly decision?: string;
-  readonly reason?: string;
-  readonly sessionId?: string;
+  readonly timestamp?: string;
+  readonly session_id?: string;
   readonly model?: string;
-  readonly turnId?: string;
+  readonly role?: string;
+  readonly content?: string;
+  readonly delta?: boolean;
+  readonly tool_name?: string;
+  readonly tool_id?: string;
+  readonly parameters?: unknown;
+  readonly status?: string;
+  readonly output?: string;
+  readonly error?: unknown;
+  readonly stats?: {
+    readonly total_tokens?: number;
+    readonly input_tokens?: number;
+    readonly output_tokens?: number;
+    readonly cached?: number;
+    readonly duration_ms?: number;
+    readonly tool_calls?: number;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +101,7 @@ function toCanonicalToolItemType(tool: string | undefined): CanonicalItemType {
  */
 export function parseGeminiStreamLine(
   threadId: ThreadId,
+  turnId: TurnId,
   rawLine: string,
 ): ReadonlyArray<ProviderRuntimeEvent> {
   const line = rawLine.trim();
@@ -115,7 +116,7 @@ export function parseGeminiStreamLine(
     return [];
   }
 
-  return mapGeminiEvent(threadId, event);
+  return mapGeminiEvent(threadId, turnId, event);
 }
 
 /**
@@ -124,9 +125,10 @@ export function parseGeminiStreamLine(
  */
 export function parseGeminiStreamLines(
   threadId: ThreadId,
+  turnId: TurnId,
   lines: ReadonlyArray<string>,
 ): ReadonlyArray<ProviderRuntimeEvent> {
-  return lines.flatMap((line) => parseGeminiStreamLine(threadId, line));
+  return lines.flatMap((line) => parseGeminiStreamLine(threadId, turnId, line));
 }
 
 // ---------------------------------------------------------------------------
@@ -135,73 +137,41 @@ export function parseGeminiStreamLines(
 
 function makeBase(
   threadId: ThreadId,
-  turnIdStr?: string,
+  turnId?: TurnId,
 ): {
   readonly eventId: EventId;
   readonly provider: "gemini";
   readonly threadId: ThreadId;
   readonly createdAt: string;
-  readonly turnId?: ReturnType<typeof TurnId.make>;
+  readonly turnId?: TurnId;
 } {
   return {
     eventId: makeEventId(),
     provider: PROVIDER,
     threadId,
     createdAt: nowIso(),
-    ...(turnIdStr ? { turnId: TurnId.make(turnIdStr) } : {}),
+    ...(turnId ? { turnId } : {}),
   };
 }
 
 function mapGeminiEvent(
   threadId: ThreadId,
+  turnId: TurnId,
   event: GeminiStreamEvent,
 ): ReadonlyArray<ProviderRuntimeEvent> {
   switch (event.type as GeminiStreamEventType) {
-    case "session_start":
-      return [
-        {
-          ...makeBase(threadId),
-          type: "session.state.changed",
-          payload: { state: "ready" as const },
-        },
-      ];
+    case "init":
+      return [];
 
-    case "session_end":
-      return [
-        {
-          ...makeBase(threadId),
-          type: "session.exited",
-          payload: {
-            exitKind: "graceful" as const,
-            ...(trimOrUndefined(event.reason) ? { reason: trimOrUndefined(event.reason)! } : {}),
-          },
-        },
-      ];
-
-    case "turn_start":
-      return [
-        {
-          ...makeBase(threadId, event.turnId),
-          type: "turn.started",
-          payload: {},
-        },
-      ];
-
-    case "turn_end":
-      return [
-        {
-          ...makeBase(threadId, event.turnId),
-          type: "turn.completed",
-          payload: { state: "completed" as const },
-        },
-      ];
-
-    case "content": {
-      const text = trimOrUndefined(event.text);
+    case "message": {
+      if (event.role !== "assistant") {
+        return [];
+      }
+      const text = event.content;
       if (!text) return [];
       return [
         {
-          ...makeBase(threadId, event.turnId),
+          ...makeBase(threadId, turnId),
           type: "content.delta",
           payload: {
             streamKind: "assistant_text" as const,
@@ -211,18 +181,14 @@ function mapGeminiEvent(
       ];
     }
 
-    case "tool_call": {
-      const itemType = toCanonicalToolItemType(event.tool);
-      const detail = trimOrUndefined(
-        typeof event.input === "string"
-          ? event.input
-          : event.input
-            ? JSON.stringify(event.input)
-            : event.tool,
-      );
+    case "tool_use": {
+      const itemType = toCanonicalToolItemType(event.tool_name);
+      const detail = event.parameters ? JSON.stringify(event.parameters) : event.tool_name;
+      const itemId = event.tool_id ? ProviderItemId.make(event.tool_id) : undefined;
       return [
         {
-          ...makeBase(threadId, event.turnId),
+          ...makeBase(threadId, turnId),
+          ...(itemId ? { providerRefs: { providerItemId: itemId } } : {}),
           type: "item.started",
           payload: {
             itemType,
@@ -234,19 +200,29 @@ function mapGeminiEvent(
     }
 
     case "tool_result": {
-      const itemType = toCanonicalToolItemType(event.tool);
-      const detail = trimOrUndefined(
-        typeof event.output === "string"
-          ? event.output
-          : event.output
-            ? JSON.stringify(event.output)
-            : undefined,
-      );
-      const isError = event.status === "error" || event.status === "failed";
+      const itemType = toCanonicalToolItemType(event.tool_name);
+      const isError = event.status === "error";
+      const detail = event.output ?? (event.error ? JSON.stringify(event.error) : undefined);
+      const itemId = event.tool_id ? ProviderItemId.make(event.tool_id) : undefined;
+
+      const baseEvent = {
+        ...makeBase(threadId, turnId),
+        ...(itemId ? { providerRefs: { providerItemId: itemId } } : {}),
+      };
+
       if (isError) {
         return [
           {
-            ...makeBase(threadId, event.turnId),
+            ...baseEvent,
+            type: "item.completed",
+            payload: {
+              itemType,
+              status: "failed" as const,
+              ...(detail ? { detail } : {}),
+            },
+          },
+          {
+            ...baseEvent,
             type: "runtime.error",
             payload: {
               message: detail ?? "Tool call failed",
@@ -255,9 +231,10 @@ function mapGeminiEvent(
           },
         ];
       }
+
       return [
         {
-          ...makeBase(threadId, event.turnId),
+          ...baseEvent,
           type: "item.completed",
           payload: {
             itemType,
@@ -268,58 +245,26 @@ function mapGeminiEvent(
       ];
     }
 
-    case "approval_request": {
-      const requestId = trimOrUndefined(event.requestId);
-      if (!requestId) return [];
-      const detail = trimOrUndefined(event.reason ?? event.tool);
+    case "result": {
+      if (!event.stats) return [];
       return [
         {
-          ...makeBase(threadId, event.turnId),
-          type: "request.opened",
+          ...makeBase(threadId, turnId),
+          type: "thread.token-usage.updated",
           payload: {
-            requestType: "exec_command_approval" as const,
-            ...(detail ? { detail } : {}),
-          },
-        },
-      ];
-    }
-
-    case "approval_response": {
-      const requestId = trimOrUndefined(event.requestId);
-      if (!requestId) return [];
-      const decision =
-        event.decision === "accept" || event.decision === "acceptForSession"
-          ? event.decision
-          : "decline";
-      return [
-        {
-          ...makeBase(threadId, event.turnId),
-          type: "request.resolved",
-          payload: {
-            requestType: "exec_command_approval" as const,
-            decision,
-          },
-        },
-      ];
-    }
-
-    case "error": {
-      const message = trimOrUndefined(event.error ?? event.text);
-      if (!message) return [];
-      return [
-        {
-          ...makeBase(threadId),
-          type: "runtime.error",
-          payload: {
-            message,
-            class: "provider_error" as const,
+            usage: {
+              usedTokens: event.stats.total_tokens ?? 0,
+              inputTokens: event.stats.input_tokens,
+              outputTokens: event.stats.output_tokens,
+              cachedInputTokens: event.stats.cached,
+              compactsAutomatically: true,
+            },
           },
         },
       ];
     }
 
     default:
-      // Unknown event types from future Gemini CLI versions are silently dropped.
       return [];
   }
 }

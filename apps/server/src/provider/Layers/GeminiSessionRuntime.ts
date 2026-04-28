@@ -30,7 +30,7 @@ import {
   type ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Effect, Queue, Ref, Scope, Schema, Stream } from "effect";
+import { Effect, Queue, Ref, Scope, Schema, Stream, Deferred } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { parseGeminiStreamLine } from "./GeminiStreamParser.ts";
@@ -133,22 +133,6 @@ function makeEventId(): EventId {
   return EventId.make(randomUUID());
 }
 
-/**
- * Write a UTF-8 string to a child process stdin via its Effect Sink.
- * The sink type is `Sink<void, Uint8Array, never, never>` as provided by
- * `ChildProcessHandle.stdin`. We use `unknown` to avoid fragile type
- * gymnastics — the Shape interface narrows callers to this module.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const writeToStdin = (stdin: any, text: string): Effect.Effect<void> => {
-  const bytes = new TextEncoder().encode(text);
-  // Stream.run returns Effect<R,E,A> — we just want void here.
-  return (Stream.make(bytes).pipe(Stream.run(stdin)) as Effect.Effect<void, never, never>).pipe(
-    Effect.asVoid,
-    Effect.ignore,
-  );
-};
-
 export const makeGeminiSessionRuntime = (
   options: GeminiSessionRuntimeOptions,
 ): Effect.Effect<
@@ -162,9 +146,6 @@ export const makeGeminiSessionRuntime = (
     const eventsQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const model = resolveModel(options.model);
 
-    // Build CLI args. We use stream-json output format for structured events.
-    const args: string[] = ["--output-format", "stream-json", "--model", model];
-
     const initialSession: ProviderSession = {
       provider: PROVIDER,
       status: "connecting",
@@ -177,25 +158,9 @@ export const makeGeminiSessionRuntime = (
       updatedAt: nowIso(),
     };
     const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
-
-    // Spawn the long-lived Gemini CLI process.
-    const childHandle = yield* spawner
-      .spawn(
-        ChildProcess.make(options.binaryPath, args, {
-          cwd: options.cwd,
-          shell: process.platform === "win32",
-        }),
-      )
-      .pipe(
-        Effect.provideService(Scope.Scope, runtimeScope),
-        Effect.mapError(
-          (cause) =>
-            new GeminiSessionRuntimeProcessError({
-              detail: `Failed to spawn Gemini CLI: ${cause instanceof Error ? cause.message : String(cause)}`,
-              cause,
-            }),
-        ),
-      );
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const activeChildRef = yield* Ref.make<any>(undefined);
+    const closedRef = yield* Ref.make(false);
 
     // ── Emit helpers ──────────────────────────────────────────────────────
 
@@ -213,30 +178,6 @@ export const makeGeminiSessionRuntime = (
         type: "session.state.changed",
         payload: { state },
       });
-
-    // ── Stdout consumption ────────────────────────────────────────────────
-    // Decode UTF-8 chunks into lines, parse each as a Gemini stream-json event.
-
-    let lineBuffer = "";
-    const decoder = new TextDecoder("utf-8");
-
-    const processChunk = (chunk: Uint8Array): ReadonlyArray<ProviderRuntimeEvent> => {
-      lineBuffer += decoder.decode(chunk, { stream: true });
-      const lines = lineBuffer.split("\n");
-      lineBuffer = lines.pop() ?? "";
-      return lines.flatMap((line) => parseGeminiStreamLine(options.threadId, line));
-    };
-
-    yield* childHandle.stdout.pipe(
-      Stream.mapEffect((chunk) =>
-        Effect.forEach(processChunk(chunk), emitEvent, {
-          concurrency: 1,
-          discard: true,
-        }),
-      ),
-      Stream.runDrain,
-      Effect.forkIn(runtimeScope),
-    );
 
     // ── Session lifecycle ────────────────────────────────────────────────
 
@@ -256,8 +197,7 @@ export const makeGeminiSessionRuntime = (
     const getSession: Effect.Effect<ProviderSession> = Ref.get(sessionRef);
 
     /**
-     * Send a turn by writing the prompt text to the Gemini CLI stdin.
-     * The CLI reads one prompt per newline-terminated line.
+     * Send a turn by spawning a new Gemini CLI process with the prompt.
      */
     const sendTurn = (input: {
       readonly text: string;
@@ -267,7 +207,7 @@ export const makeGeminiSessionRuntime = (
         const session = yield* Ref.get(sessionRef);
         const turnId = input.turnId ?? TurnId.make(randomUUID());
 
-        // Emit turn.started before writing to CLI.
+        // Emit turn.started locally.
         yield* emitEvent({
           eventId: makeEventId(),
           provider: PROVIDER,
@@ -278,7 +218,6 @@ export const makeGeminiSessionRuntime = (
           turnId,
         });
 
-        // Update session to running.
         yield* Ref.update(sessionRef, (s) => ({
           ...s,
           status: "running" as const,
@@ -286,87 +225,196 @@ export const makeGeminiSessionRuntime = (
           updatedAt: nowIso(),
         }));
 
-        // Write the prompt to stdin.
-        yield* writeToStdin(
-          childHandle.stdin as Parameters<typeof Stream.run>[1],
-          `${input.text}\n`,
+        const args: string[] = [
+          "-p",
+          input.text,
+          "--output-format",
+          "stream-json",
+          "--skip-trust",
+          "--approval-mode",
+          "auto_edit",
+          "--model",
+          model,
+        ];
+
+        // Only pass resume if we already have a Gemini session ID
+        const currentCursor = readGeminiResumeCursor(session.resumeCursor);
+        if (currentCursor?.sessionId) {
+          args.push("--resume", currentCursor.sessionId);
+        }
+
+        const childHandle = yield* spawner
+          .spawn(
+            ChildProcess.make(options.binaryPath, args, {
+              cwd: options.cwd,
+              shell: process.platform === "win32",
+            }),
+          )
+          .pipe(
+            Effect.provideService(Scope.Scope, runtimeScope),
+            Effect.mapError(
+              (cause) =>
+                new GeminiSessionRuntimeProcessError({
+                  detail: `Failed to spawn Gemini CLI: ${cause instanceof Error ? cause.message : String(cause)}`,
+                  cause,
+                }),
+            ),
+          );
+
+        yield* Ref.set(activeChildRef, childHandle);
+
+        let stdoutBuffer = "";
+
+        const initDeferred = yield* Deferred.make<string, never>();
+
+        // Consume stdout
+        yield* childHandle.stdout.pipe(
+          Stream.decodeText(),
+          Stream.runForEach((chunk) => {
+            stdoutBuffer += chunk;
+            const lines = stdoutBuffer.split("\n");
+            stdoutBuffer = lines.pop() ?? "";
+            return Effect.forEach(
+              lines,
+              (line) => {
+                if (line.trim()) {
+                  try {
+                    const parsed = JSON.parse(line);
+                    if (parsed.type === "init" && parsed.session_id) {
+                      return Effect.flatMap(
+                        Deferred.succeed(initDeferred, parsed.session_id),
+                        () => Effect.forEach(parseGeminiStreamLine(options.threadId, turnId, line), emitEvent, { discard: true })
+                      );
+                    }
+                  } catch {
+                    // ignore JSON parse error here
+                  }
+                }
+                return Effect.forEach(
+                  parseGeminiStreamLine(options.threadId, turnId, line),
+                  emitEvent,
+                  { concurrency: 1, discard: true }
+                );
+              },
+              { concurrency: 1, discard: true }
+            );
+          }),
+          Effect.forkIn(runtimeScope),
         );
+
+        // Consume stderr
+        yield* childHandle.stderr.pipe(
+          Stream.decodeText(),
+          Stream.runForEach((chunk) => {
+            const line = chunk.trim();
+            if (!line) return Effect.void;
+            // Ignore color warnings
+            if (line.includes("256-color support not detected")) return Effect.void;
+            return emitEvent({
+              eventId: makeEventId(),
+              provider: PROVIDER,
+              threadId: options.threadId,
+              createdAt: nowIso(),
+              type: "runtime.error",
+              payload: { message: line, class: "provider_error" },
+            });
+          }),
+          Effect.forkIn(runtimeScope),
+        );
+
+        // Track process exit to end the turn
+        yield* childHandle.exitCode.pipe(
+          Effect.flatMap((exitCode) =>
+            Effect.gen(function* () {
+              // Unblock sendTurn if the process exited before emitting init
+              yield* Deferred.succeed(initDeferred, "");
+
+              yield* Ref.set(activeChildRef, undefined);
+              const closed = yield* Ref.get(closedRef);
+              if (closed) return;
+
+              const isError = exitCode !== 0;
+              yield* Ref.update(sessionRef, (s) => ({
+                ...s,
+                status: "ready" as const,
+                activeTurnId: undefined,
+                updatedAt: nowIso(),
+              }));
+
+              yield* emitEvent({
+                eventId: makeEventId(),
+                provider: PROVIDER,
+                threadId: options.threadId,
+                createdAt: nowIso(),
+                turnId,
+                type: "turn.completed",
+                payload: {
+                  state: isError ? "failed" : "completed",
+                  ...(isError ? { errorMessage: `Gemini CLI process exited with code ${exitCode}` } : {})
+                },
+              });
+            }),
+          ),
+          Effect.forkIn(runtimeScope),
+        );
+
+        const newSessionId = yield* Deferred.await(initDeferred);
+
+        if (newSessionId) {
+          yield* Ref.update(sessionRef, (s) => ({
+            ...s,
+            resumeCursor: { version: 1, sessionId: newSessionId }
+          }));
+        }
+
+        const finalSession = yield* Ref.get(sessionRef);
 
         return {
           threadId: options.threadId,
           turnId,
-          resumeCursor: session.resumeCursor,
+          resumeCursor: finalSession.resumeCursor,
         } satisfies ProviderTurnStartResult;
       });
 
     /**
-     * Interrupt the current turn by sending SIGINT to the Gemini process.
+     * Interrupt the current turn by killing the active process.
      */
     const interruptTurn = (): Effect.Effect<void, GeminiSessionRuntimeError> =>
       Effect.gen(function* () {
-        yield* Effect.sync(() => {
-          try {
-            process.kill(childHandle.pid, "SIGINT");
-          } catch {
-            // Process may already be gone – ignore.
-          }
-        });
-
-        yield* emitEvent({
-          eventId: makeEventId(),
-          provider: PROVIDER,
-          threadId: options.threadId,
-          createdAt: nowIso(),
-          type: "turn.aborted",
-          payload: { reason: "interrupted" },
-        });
-
-        yield* Ref.update(sessionRef, (s) => ({
-          ...s,
-          status: "ready" as const,
-          activeTurnId: undefined,
-          updatedAt: nowIso(),
-        }));
-      });
-
-    /**
-     * Respond to an approval request by writing "y\n" or "n\n" to stdin.
-     */
-    const respondToRequest = (
-      _requestId: ApprovalRequestId,
-      decision: ProviderApprovalDecision,
-    ): Effect.Effect<void, GeminiSessionRuntimeError> =>
-      writeToStdin(
-        childHandle.stdin as Parameters<typeof Stream.run>[1],
-        decision === "accept" || decision === "acceptForSession" ? "y\n" : "n\n",
-      );
-
-    /**
-     * Respond to a user input request by writing the first string answer to stdin.
-     */
-    const respondToUserInput = (
-      _requestId: ApprovalRequestId,
-      answers: ProviderUserInputAnswers,
-    ): Effect.Effect<void, GeminiSessionRuntimeError> => {
-      const firstAnswer = Object.values(answers).find((v): v is string => typeof v === "string");
-      if (!firstAnswer) return Effect.void;
-      return writeToStdin(
-        childHandle.stdin as Parameters<typeof Stream.run>[1],
-        `${firstAnswer}\n`,
-      );
-    };
-
-    /**
-     * Stop the session by sending SIGTERM to the child process.
-     */
-    const close: Effect.Effect<void> = Effect.gen(function* () {
-      yield* Effect.sync(() => {
-        try {
-          process.kill(childHandle.pid, "SIGTERM");
-        } catch {
-          // Already gone.
+        const childHandle = yield* Ref.get(activeChildRef);
+        if (childHandle) {
+          yield* Effect.sync(() => {
+            try {
+              process.kill(childHandle.pid, "SIGINT");
+            } catch {
+              // ignore
+            }
+          });
         }
       });
+
+    const respondToRequest = (
+      _requestId: ApprovalRequestId,
+      _decision: ProviderApprovalDecision,
+    ): Effect.Effect<void, GeminiSessionRuntimeError> => Effect.void;
+
+    const respondToUserInput = (
+      _requestId: ApprovalRequestId,
+      _answers: ProviderUserInputAnswers,
+    ): Effect.Effect<void, GeminiSessionRuntimeError> => Effect.void;
+
+    const close: Effect.Effect<void> = Effect.gen(function* () {
+      yield* Ref.set(closedRef, true);
+      const childHandle = yield* Ref.get(activeChildRef);
+      if (childHandle) {
+        yield* Effect.sync(() => {
+          try {
+            process.kill(childHandle.pid, "SIGTERM");
+          } catch {
+            // ignore
+          }
+        });
+      }
 
       yield* Ref.update(sessionRef, (s) => ({
         ...s,
