@@ -1,85 +1,259 @@
 /**
- * GeminiAdapterLive - Scoped live implementation for the Gemini CLI provider adapter.
+ * GeminiAdapterLive - Live implementation of the Gemini provider adapter.
  *
- * Spawns and manages Gemini CLI sessions, parses stream-json output into
- * canonical ProviderRuntimeEvents, and forwards approval requests to the
- * shared orchestration layer.
- *
- * NOTE: Full runtime implementation is in progress. Session operations are
- * stubbed and will be replaced with the live Gemini CLI integration.
+ * Manages a per-thread map of `GeminiSessionRuntime` instances, routes
+ * adapter operations to the correct runtime, and translates runtime errors
+ * into the shared `ProviderAdapterError` algebra.
  *
  * @module GeminiAdapterLive
  */
-import { Effect, Layer, PubSub, Stream } from "effect";
+import { randomUUID } from "node:crypto";
 
-import type { ProviderAdapterError } from "../Errors.ts";
-import { ProviderAdapterSessionNotFoundError } from "../Errors.ts";
-import type { ProviderRuntimeEvent } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  type ProviderRuntimeEvent,
+  type ProviderSession,
+  type ProviderTurnStartResult,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
+import { Effect, Layer, Ref, Stream } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
+
+import {
+  ProviderAdapterProcessError,
+  ProviderAdapterRequestError,
+  ProviderAdapterSessionNotFoundError,
+  type ProviderAdapterError,
+} from "../Errors.ts";
 import { GeminiAdapter, type GeminiAdapterShape } from "../Services/GeminiAdapter.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
+import {
+  makeGeminiSessionRuntime,
+  type GeminiSessionRuntimeError,
+  type GeminiSessionRuntimeShape,
+} from "./GeminiSessionRuntime.ts";
+
+const PROVIDER = "gemini" as const;
+
+// ---------------------------------------------------------------------------
+// Error mapping
+// ---------------------------------------------------------------------------
+
+function mapRuntimeError(
+  threadId: ThreadId,
+  method: string,
+  error: GeminiSessionRuntimeError,
+): ProviderAdapterError {
+  if (error._tag === "GeminiSessionRuntimeProcessError") {
+    return new ProviderAdapterProcessError({
+      provider: PROVIDER,
+      threadId,
+      detail: error.detail,
+      cause: error.cause,
+    });
+  }
+  return new ProviderAdapterRequestError({
+    provider: PROVIDER,
+    method,
+    detail: error.message,
+    cause: error,
+  });
+}
+
+function notFound(threadId: ThreadId): ProviderAdapterError {
+  return new ProviderAdapterSessionNotFoundError({
+    provider: PROVIDER,
+    threadId,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Adapter factory
+// ---------------------------------------------------------------------------
 
 const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* () {
-  const eventsPubSub = yield* Effect.acquireRelease(
-    PubSub.unbounded<ProviderRuntimeEvent>(),
-    PubSub.shutdown,
+  const serverSettingsService = yield* ServerSettingsService;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+
+  // Per-thread runtime map.
+  const sessionsRef = yield* Ref.make<Map<ThreadId, GeminiSessionRuntimeShape>>(new Map());
+
+  // Shared event stream: merge events from all runtime instances.
+  // We maintain a list of per-session streams and combine them.
+  const sessionEventsRef = yield* Ref.make<ReadonlyArray<Stream.Stream<ProviderRuntimeEvent>>>([]);
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+
+  const getRuntime = (threadId: ThreadId): Effect.Effect<GeminiSessionRuntimeShape, ProviderAdapterError> =>
+    Ref.get(sessionsRef).pipe(
+      Effect.flatMap((sessions) => {
+        const runtime = sessions.get(threadId);
+        return runtime ? Effect.succeed(runtime) : Effect.fail(notFound(threadId));
+      }),
+    );
+
+  const resolveGeminiBinaryPath: Effect.Effect<string> = serverSettingsService.getSettings.pipe(
+    Effect.map((settings) => settings.providers.gemini.binaryPath),
+    Effect.orElseSucceed(() => "gemini"),
   );
 
+  // ── Adapter implementation ────────────────────────────────────────────────
+
   const adapter: GeminiAdapterShape = {
-    provider: "gemini",
+    provider: PROVIDER,
     capabilities: { sessionModelSwitch: "unsupported" },
 
     startSession: (input) =>
-      Effect.die(
-        new Error(`GeminiAdapter.startSession not yet implemented for thread ${input.threadId}`),
-      ),
+      Effect.gen(function* () {
+        const binaryPath = yield* resolveGeminiBinaryPath;
+        const model =
+          input.modelSelection?.provider === "gemini"
+            ? input.modelSelection.model
+            : DEFAULT_MODEL_BY_PROVIDER.gemini;
+
+        const resumeCursor = input.resumeCursor as
+          | import("./GeminiSessionRuntime.ts").GeminiResumeCursor
+          | undefined;
+
+        const runtimeOptions = {
+          threadId: input.threadId,
+          binaryPath,
+          cwd: input.cwd ?? process.cwd(),
+          runtimeMode: input.runtimeMode,
+          model,
+          ...(resumeCursor !== undefined ? { resumeCursor } : {}),
+        } satisfies import("./GeminiSessionRuntime.ts").GeminiSessionRuntimeOptions;
+
+        const runtime = yield* makeGeminiSessionRuntime(runtimeOptions).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.mapError((err) => mapRuntimeError(input.threadId, "startSession", err)),
+          Effect.scoped,
+        );
+
+        // Register runtime and add its event stream.
+        yield* Ref.update(sessionsRef, (sessions) =>
+          new Map([...sessions, [input.threadId, runtime]]),
+        );
+        yield* Ref.update(sessionEventsRef, (streams) => [...streams, runtime.events]);
+
+        // Start the session and transition to ready.
+        const session = yield* runtime.start().pipe(
+          Effect.mapError((err) => mapRuntimeError(input.threadId, "startSession", err)),
+        );
+
+        return session;
+      }),
 
     sendTurn: (input) =>
-      Effect.die(
-        new Error(`GeminiAdapter.sendTurn not yet implemented for thread ${input.threadId}`),
-      ),
+      Effect.gen(function* () {
+        const runtime = yield* getRuntime(input.threadId);
+        const turnId = TurnId.make(randomUUID());
+        return yield* runtime
+          .sendTurn({
+            text: input.input ?? "",
+            turnId,
+          })
+          .pipe(Effect.mapError((err) => mapRuntimeError(input.threadId, "sendTurn", err)));
+      }),
 
     interruptTurn: (threadId) =>
-      Effect.fail(
-        new ProviderAdapterSessionNotFoundError({
-          provider: "gemini" as const,
-          threadId,
-        }) as unknown as ProviderAdapterError,
+      getRuntime(threadId).pipe(
+        Effect.flatMap((runtime) =>
+          runtime
+            .interruptTurn()
+            .pipe(Effect.mapError((err) => mapRuntimeError(threadId, "interruptTurn", err))),
+        ),
       ),
 
-    respondToRequest: (_threadId, _requestId, _decision) => Effect.void,
+    respondToRequest: (threadId, requestId, decision) =>
+      getRuntime(threadId).pipe(
+        Effect.flatMap((runtime) =>
+          runtime
+            .respondToRequest(requestId, decision)
+            .pipe(Effect.mapError((err) => mapRuntimeError(threadId, "respondToRequest", err))),
+        ),
+      ),
 
-    respondToUserInput: (_threadId, _requestId, _answers) => Effect.void,
+    respondToUserInput: (threadId, requestId, answers) =>
+      getRuntime(threadId).pipe(
+        Effect.flatMap((runtime) =>
+          runtime
+            .respondToUserInput(requestId, answers)
+            .pipe(Effect.mapError((err) => mapRuntimeError(threadId, "respondToUserInput", err))),
+        ),
+      ),
 
     stopSession: (threadId) =>
-      Effect.fail(
-        new ProviderAdapterSessionNotFoundError({
-          provider: "gemini" as const,
-          threadId,
-        }) as unknown as ProviderAdapterError,
+      Effect.gen(function* () {
+        const sessions = yield* Ref.get(sessionsRef);
+        const runtime = sessions.get(threadId);
+        if (!runtime) return;
+
+        yield* runtime.close.pipe(Effect.ignore);
+        yield* Ref.update(sessionsRef, (map) => {
+          const next = new Map(map);
+          next.delete(threadId);
+          return next;
+        });
+      }),
+
+    listSessions: () =>
+      Ref.get(sessionsRef).pipe(
+        Effect.flatMap((sessions) =>
+          Effect.forEach(
+            Array.from(sessions.values()),
+            (runtime) => runtime.getSession,
+            { concurrency: "unbounded" },
+          ),
+        ),
+        Effect.map((sessions): ReadonlyArray<ProviderSession> => sessions),
       ),
 
-    listSessions: () => Effect.succeed([]),
-
-    hasSession: (_threadId) => Effect.succeed(false),
+    hasSession: (threadId) =>
+      Ref.get(sessionsRef).pipe(Effect.map((sessions) => sessions.has(threadId))),
 
     readThread: (threadId) =>
       Effect.fail(
-        new ProviderAdapterSessionNotFoundError({
-          provider: "gemini" as const,
-          threadId,
-        }) as unknown as ProviderAdapterError,
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "readThread",
+          detail: "Gemini provider does not support thread read (no checkpoint storage).",
+          cause: undefined,
+        }),
       ),
 
     rollbackThread: (threadId) =>
       Effect.fail(
-        new ProviderAdapterSessionNotFoundError({
-          provider: "gemini" as const,
-          threadId,
-        }) as unknown as ProviderAdapterError,
+        new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "rollbackThread",
+          detail: "Gemini provider does not support thread rollback.",
+          cause: undefined,
+        }),
       ),
 
-    stopAll: () => Effect.void,
+    stopAll: () =>
+      Effect.gen(function* () {
+        const sessions = yield* Ref.get(sessionsRef);
+        yield* Effect.forEach(
+          Array.from(sessions.values()),
+          (runtime) => runtime.close.pipe(Effect.ignore),
+          { concurrency: "unbounded", discard: true },
+        );
+        yield* Ref.set(sessionsRef, new Map());
+      }),
 
-    streamEvents: Stream.fromPubSub(eventsPubSub),
+    get streamEvents(): Stream.Stream<ProviderRuntimeEvent> {
+      // Return a stream that merges events from all current active sessions.
+      // We use a flat-mapped approach: read the current set of streams each
+      // time the outer stream is subscribed to and merge them together.
+      return Stream.fromEffect(Ref.get(sessionEventsRef)).pipe(
+        Stream.flatMap((streams) =>
+          streams.length === 0 ? Stream.empty : Stream.mergeAll(streams, { concurrency: 64 }),
+        ),
+      );
+    },
   };
 
   return adapter;
