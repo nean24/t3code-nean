@@ -144,4 +144,19 @@ describe("serverSettings helpers", () => {
       ],
     });
   });
+
+  it("preserves Gemini provider settings when applying settings patches", () => {
+    const next = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      providers: {
+        gemini: {
+          enabled: true,
+          binaryPath: "gemini",
+          customModels: ["gemini-3.1-pro-preview"],
+        },
+      },
+    });
+
+    expect(next.providers.gemini.binaryPath).toBe("gemini");
+    expect(next.providers.gemini.customModels).toEqual(["gemini-3.1-pro-preview"]);
+  });
 });

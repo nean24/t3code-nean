@@ -566,6 +566,11 @@ export function GeneralSettingsPanel() {
         DEFAULT_UNIFIED_SETTINGS.providers.opencode.serverPassword ||
       settings.providers.opencode.customModels.length > 0,
     ),
+    gemini: Boolean(
+      settings.providers.gemini.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.gemini.binaryPath ||
+      settings.providers.gemini.customModels.length > 0,
+    ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
@@ -574,6 +579,7 @@ export function GeneralSettingsPanel() {
     claudeAgent: "",
     cursor: "",
     opencode: "",
+    gemini: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>

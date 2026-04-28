@@ -107,6 +107,7 @@ function createBaseServerConfig(): ServerConfig {
           serverPassword: "",
           customModels: [],
         },
+        gemini: { enabled: true, binaryPath: "gemini", customModels: [] },
       },
     },
   };

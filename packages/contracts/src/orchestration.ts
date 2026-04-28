@@ -25,7 +25,13 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeThread: "orchestration.subscribeThread",
 } as const;
 
-export const ProviderKind = Schema.Literals(["codex", "claudeAgent", "cursor", "opencode"]);
+export const ProviderKind = Schema.Literals([
+  "codex",
+  "claudeAgent",
+  "cursor",
+  "opencode",
+  "gemini",
+]);
 export type ProviderKind = typeof ProviderKind.Type;
 export const ProviderApprovalPolicy = Schema.Literals([
   "untrusted",
@@ -70,11 +76,19 @@ export const OpenCodeModelSelection = Schema.Struct({
 });
 export type OpenCodeModelSelection = typeof OpenCodeModelSelection.Type;
 
+export const GeminiModelSelection = Schema.Struct({
+  provider: Schema.Literal("gemini"),
+  model: TrimmedNonEmptyString,
+  options: Schema.optionalKey(ProviderOptionSelections),
+});
+export type GeminiModelSelection = typeof GeminiModelSelection.Type;
+
 export const ModelSelection = Schema.Union([
   CodexModelSelection,
   ClaudeModelSelection,
   CursorModelSelection,
   OpenCodeModelSelection,
+  GeminiModelSelection,
 ]);
 export type ModelSelection = typeof ModelSelection.Type;
 

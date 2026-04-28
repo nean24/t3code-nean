@@ -159,6 +159,12 @@ export function getCustomModelOptionsByProvider(
       "opencode",
       selectedProvider === "opencode" ? selectedModel : undefined,
     ),
+    gemini: getAppModelOptions(
+      settings,
+      providers,
+      "gemini",
+      selectedProvider === "gemini" ? selectedModel : undefined,
+    ),
   };
 }
 

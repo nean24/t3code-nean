@@ -93,6 +93,13 @@ describe("resolveModelSlugForProvider", () => {
       "custom/internal-model",
     );
   });
+
+  it("normalizes Gemini model aliases to exact Gemini ids", () => {
+    expect(resolveModelSlugForProvider("gemini", "gemini 2.5 pro")).toBe("gemini-2.5-pro");
+    expect(resolveModelSlugForProvider("gemini", "gemini-3-pro-preview")).toBe(
+      "gemini-3-pro-preview",
+    );
+  });
 });
 
 describe("resolveSelectableModel", () => {
@@ -193,6 +200,18 @@ describe("descriptor helpers", () => {
         { id: "reasoningEffort", value: "high" },
         { id: "fastMode", value: true },
       ],
+    });
+  });
+
+  it("creates Gemini model selections with exact provider ids", () => {
+    const selection = createModelSelection("gemini", "gemini-2.5-pro", [
+      { id: "sandboxMode", value: "workspace-write" },
+    ]);
+
+    expect(selection).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-pro",
+      options: [{ id: "sandboxMode", value: "workspace-write" }],
     });
   });
 
