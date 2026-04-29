@@ -18,7 +18,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { type AppFontPreset, DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
@@ -93,6 +93,15 @@ const THEME_OPTIONS = [
     label: "Dark",
   },
 ] as const;
+
+const APP_FONT_OPTIONS = [
+  { value: "default", label: "Default" },
+  { value: "system", label: "System" },
+  { value: "inter", label: "Inter" },
+  { value: "jetbrains-mono", label: "JetBrains Mono" },
+  { value: "sf-mono", label: "SF Mono" },
+  { value: "custom", label: "Custom" },
+] as const satisfies ReadonlyArray<{ value: AppFontPreset; label: string }>;
 
 const TIMESTAMP_FORMAT_LABELS = {
   locale: "System default",
@@ -472,6 +481,15 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
+      ...(settings.appFontPreset !== DEFAULT_UNIFIED_SETTINGS.appFontPreset ||
+      settings.appFontCustomStack !== DEFAULT_UNIFIED_SETTINGS.appFontCustomStack
+        ? ["App font"]
+        : []),
+      ...(settings.backgroundImage !== DEFAULT_UNIFIED_SETTINGS.backgroundImage ||
+      settings.backgroundOpacity !== DEFAULT_UNIFIED_SETTINGS.backgroundOpacity ||
+      settings.backgroundBlur !== DEFAULT_UNIFIED_SETTINGS.backgroundBlur
+        ? ["Background"]
+        : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
@@ -502,7 +520,12 @@ export function useSettingsRestore(onRestored?: () => void) {
     [
       areProviderSettingsDirty,
       isGitWritingModelDirty,
+      settings.appFontCustomStack,
+      settings.appFontPreset,
       settings.autoOpenPlanSidebar,
+      settings.backgroundBlur,
+      settings.backgroundImage,
+      settings.backgroundOpacity,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.addProjectBaseDirectory,
@@ -865,6 +888,182 @@ export function GeneralSettingsPanel() {
                 ))}
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          title="App font"
+          description="Choose the font used across the app shell and conversation UI."
+          resetAction={
+            settings.appFontPreset !== DEFAULT_UNIFIED_SETTINGS.appFontPreset ||
+            settings.appFontCustomStack !== DEFAULT_UNIFIED_SETTINGS.appFontCustomStack ? (
+              <SettingResetButton
+                label="app font"
+                onClick={() =>
+                  updateSettings({
+                    appFontPreset: DEFAULT_UNIFIED_SETTINGS.appFontPreset,
+                    appFontCustomStack: DEFAULT_UNIFIED_SETTINGS.appFontCustomStack,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.appFontPreset}
+              onValueChange={(value) => {
+                if (
+                  value === "default" ||
+                  value === "system" ||
+                  value === "inter" ||
+                  value === "jetbrains-mono" ||
+                  value === "sf-mono" ||
+                  value === "custom"
+                ) {
+                  updateSettings({ appFontPreset: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-44" aria-label="App font">
+                <SelectValue>
+                  {APP_FONT_OPTIONS.find((option) => option.value === settings.appFontPreset)
+                    ?.label ?? "Default"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {APP_FONT_OPTIONS.map((option) => (
+                  <SelectItem hideIndicator key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        >
+          {settings.appFontPreset === "custom" ? (
+            <div className="mt-3 pb-4">
+              <Input
+                aria-label="Custom font stack"
+                value={settings.appFontCustomStack}
+                onChange={(event) => updateSettings({ appFontCustomStack: event.target.value })}
+                placeholder={'"Inter", ui-sans-serif, system-ui, sans-serif'}
+                spellCheck={false}
+              />
+            </div>
+          ) : null}
+        </SettingsRow>
+
+        <SettingsRow
+          title="Background image"
+          description="Use a local path or URL behind the app without replacing the normal surfaces."
+          resetAction={
+            settings.backgroundImage !== DEFAULT_UNIFIED_SETTINGS.backgroundImage ? (
+              <SettingResetButton
+                label="background image"
+                onClick={() =>
+                  updateSettings({
+                    backgroundImage: DEFAULT_UNIFIED_SETTINGS.backgroundImage,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            settings.backgroundImage ? (
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={() =>
+                  updateSettings({
+                    backgroundImage: DEFAULT_UNIFIED_SETTINGS.backgroundImage,
+                  })
+                }
+              >
+                Clear
+              </Button>
+            ) : null
+          }
+        >
+          <div className="mt-3 pb-4">
+            <Input
+              aria-label="Background image URL or path"
+              value={settings.backgroundImage}
+              onChange={(event) => updateSettings({ backgroundImage: event.target.value })}
+              placeholder="https://example.com/background.jpg or C:/Pictures/background.jpg"
+              spellCheck={false}
+            />
+          </div>
+        </SettingsRow>
+
+        <SettingsRow
+          title="Background strength"
+          description="Control how visible the background image is behind app surfaces."
+          status={
+            <span className="font-mono tabular-nums">
+              {Math.round(settings.backgroundOpacity * 100)}%
+            </span>
+          }
+          resetAction={
+            settings.backgroundOpacity !== DEFAULT_UNIFIED_SETTINGS.backgroundOpacity ? (
+              <SettingResetButton
+                label="background strength"
+                onClick={() =>
+                  updateSettings({
+                    backgroundOpacity: DEFAULT_UNIFIED_SETTINGS.backgroundOpacity,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <input
+              className="h-2 w-full accent-primary sm:w-44"
+              type="range"
+              min={0}
+              max={0.6}
+              step={0.05}
+              value={settings.backgroundOpacity}
+              onChange={(event) =>
+                updateSettings({
+                  backgroundOpacity: Number(event.target.value),
+                })
+              }
+              aria-label="Background strength"
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Background blur"
+          description="Soften detailed images while keeping the interface readable."
+          status={<span className="font-mono tabular-nums">{settings.backgroundBlur}px</span>}
+          resetAction={
+            settings.backgroundBlur !== DEFAULT_UNIFIED_SETTINGS.backgroundBlur ? (
+              <SettingResetButton
+                label="background blur"
+                onClick={() =>
+                  updateSettings({
+                    backgroundBlur: DEFAULT_UNIFIED_SETTINGS.backgroundBlur,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <input
+              className="h-2 w-full accent-primary sm:w-44"
+              type="range"
+              min={0}
+              max={24}
+              step={1}
+              value={settings.backgroundBlur}
+              onChange={(event) =>
+                updateSettings({
+                  backgroundBlur: Number(event.target.value),
+                })
+              }
+              aria-label="Background blur"
+            />
           }
         />
 

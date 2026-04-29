@@ -1,7 +1,7 @@
 import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
 import { memo } from "react";
 import { Clock3Icon, SparklesIcon, StarIcon } from "lucide-react";
-import { Gemini, GithubCopilotIcon } from "../Icons";
+import { GithubCopilotIcon } from "../Icons";
 import { AVAILABLE_PROVIDER_OPTIONS, PROVIDER_ICON_BY_PROVIDER } from "./providerIconUtils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
@@ -9,7 +9,7 @@ import { getProviderSnapshot } from "../../providerModels";
 
 function describeUnavailableProvider(label: string, live: ServerProvider | undefined): string {
   if (!live) {
-    return `${label} — waiting for provider status…`;
+    return `${label} - waiting for provider status...`;
   }
   if (live.status === "ready") {
     return label;
@@ -23,7 +23,7 @@ function describeUnavailableProvider(label: string, live: ServerProvider | undef
           ? "Disabled in settings"
           : "Not ready";
   const msg = live.message?.trim();
-  return msg ? `${label} — ${kind}. ${msg}` : `${label} — ${kind}.`;
+  return msg ? `${label} - ${kind}. ${msg}` : `${label} - ${kind}.`;
 }
 
 const SELECTED_BUTTON_CLASS = "bg-background text-foreground shadow-sm";
@@ -49,7 +49,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
 
   return (
     <div className="flex flex-col w-12 border-r bg-muted/30  p-1 overflow-y-auto gap-1">
-      {/* Favorites section */}
       <div className="pb-1 mb-1 border-b">
         <div className="relative w-full">
           {props.selectedProvider === "favorites" && <div className={SELECTED_INDICATOR_CLASS} />}
@@ -81,7 +80,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
         </div>
       </div>
 
-      {/* Provider buttons */}
       {AVAILABLE_PROVIDER_OPTIONS.map((option) => {
         const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
         const liveProvider = props.providers
@@ -95,7 +93,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
         const providerTooltip = isDisabled
           ? describeUnavailableProvider(option.label, liveProvider)
           : badge === "new"
-            ? `${option.label} — New`
+            ? `${option.label} - New`
             : option.label;
 
         const button = (
@@ -153,33 +151,6 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
         );
       })}
 
-      {/* Gemini button (coming soon) */}
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span className="relative block w-full">
-              <button
-                className={cn(
-                  "relative isolate flex w-full aspect-square items-center justify-center rounded opacity-50 cursor-not-allowed transition-colors hover:bg-transparent",
-                )}
-                disabled
-                type="button"
-                data-model-picker-provider="gemini-coming-soon"
-                aria-label="Gemini — coming soon"
-              >
-                <Gemini className="size-5 text-muted-foreground/85" aria-hidden />
-                <span className={SOON_BADGE_CLASS} aria-hidden>
-                  <Clock3Icon className="size-2" />
-                </span>
-              </button>
-            </span>
-          }
-        />
-        <TooltipPopup side={PICKER_TOOLTIP_SIDE} align="center" className={PICKER_TOOLTIP_CLASS}>
-          Gemini — Coming soon
-        </TooltipPopup>
-      </Tooltip>
-      {/* Github Copilot button (coming soon) */}
       <Tooltip>
         <TooltipTrigger
           render={
@@ -191,7 +162,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 disabled
                 type="button"
                 data-model-picker-provider="github-copilot-coming-soon"
-                aria-label="Github Copilot — coming soon"
+                aria-label="Github Copilot - coming soon"
               >
                 <GithubCopilotIcon className="size-5 text-muted-foreground/85" aria-hidden />
                 <span className={SOON_BADGE_CLASS} aria-hidden>
@@ -202,7 +173,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
           }
         />
         <TooltipPopup side={PICKER_TOOLTIP_SIDE} align="center" className={PICKER_TOOLTIP_CLASS}>
-          Github Copilot — Coming soon
+          Github Copilot - Coming soon
         </TooltipPopup>
       </Tooltip>
     </div>

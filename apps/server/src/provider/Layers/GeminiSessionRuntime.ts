@@ -264,7 +264,7 @@ export const makeGeminiSessionRuntime = (
         yield* Ref.set(activeChildRef, childHandle);
 
         yield* Stream.make(new TextEncoder().encode(`${input.text}\n`))
-          .pipe(Stream.run(childHandle.stdin as Parameters<typeof Stream.run>[1]))
+          .pipe(Stream.run(childHandle.stdin))
           .pipe(Effect.forkIn(runtimeScope));
 
         let stdoutBuffer = "";

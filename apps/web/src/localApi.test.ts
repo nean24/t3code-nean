@@ -529,7 +529,12 @@ describe("wsApi", () => {
 
   it("reads and writes persistence through the desktop bridge when available", async () => {
     const clientSettings = {
+      appFontCustomStack: "",
+      appFontPreset: "default" as const,
       autoOpenPlanSidebar: false,
+      backgroundBlur: 0,
+      backgroundImage: "",
+      backgroundOpacity: 0,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffWordWrap: true,
@@ -588,7 +593,12 @@ describe("wsApi", () => {
     const { createLocalApi } = await import("./localApi");
     const api = createLocalApi(rpcClientMock as never);
     const clientSettings = {
+      appFontCustomStack: "",
+      appFontPreset: "default" as const,
       autoOpenPlanSidebar: false,
+      backgroundBlur: 0,
+      backgroundImage: "",
+      backgroundOpacity: 0,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffWordWrap: true,

@@ -14,6 +14,17 @@ export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"])
 export type TimestampFormat = typeof TimestampFormat.Type;
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 
+export const AppFontPreset = Schema.Literals([
+  "default",
+  "system",
+  "inter",
+  "jetbrains-mono",
+  "sf-mono",
+  "custom",
+]);
+export type AppFontPreset = typeof AppFontPreset.Type;
+export const DEFAULT_APP_FONT_PRESET: AppFontPreset = "default";
+
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
@@ -31,6 +42,17 @@ export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
 export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
 
 export const ClientSettingsSchema = Schema.Struct({
+  appFontCustomStack: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  appFontPreset: AppFontPreset.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_APP_FONT_PRESET)),
+  ),
+  backgroundBlur: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
+    .check(Schema.isLessThanOrEqualTo(24))
+    .pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  backgroundImage: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  backgroundOpacity: Schema.Number.check(Schema.isGreaterThanOrEqualTo(0))
+    .check(Schema.isLessThanOrEqualTo(0.6))
+    .pipe(Schema.withDecodingDefault(Effect.succeed(0))),
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
@@ -264,6 +286,11 @@ export const ServerSettingsPatch = Schema.Struct({
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
 export const ClientSettingsPatch = Schema.Struct({
+  appFontCustomStack: Schema.optionalKey(Schema.String),
+  appFontPreset: Schema.optionalKey(AppFontPreset),
+  backgroundBlur: Schema.optionalKey(Schema.Number),
+  backgroundImage: Schema.optionalKey(Schema.String),
+  backgroundOpacity: Schema.optionalKey(Schema.Number),
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),

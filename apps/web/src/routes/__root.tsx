@@ -28,6 +28,7 @@ import {
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readLocalApi } from "../localApi";
 import { useSettings } from "../hooks/useSettings";
+import { useAppearanceSettings } from "../hooks/useAppearanceSettings";
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
@@ -97,6 +98,7 @@ function RootRouteView() {
   return (
     <ToastProvider>
       <AnchoredToastProvider>
+        <AppearanceSettingsBridge />
         <AuthenticatedTracingBootstrap />
         <ServerStateBootstrap />
         <EnvironmentConnectionManagerBootstrap />
@@ -113,6 +115,11 @@ function RootRouteView() {
       </AnchoredToastProvider>
     </ToastProvider>
   );
+}
+
+function AppearanceSettingsBridge() {
+  useAppearanceSettings();
+  return null;
 }
 
 function RootRouteErrorView({ error, reset }: ErrorComponentProps) {

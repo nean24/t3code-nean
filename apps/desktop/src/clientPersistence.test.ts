@@ -49,7 +49,12 @@ function makeSecretStorage(available: boolean): DesktopSecretStorage {
 }
 
 const clientSettings: ClientSettings = {
+  appFontCustomStack: "",
+  appFontPreset: "default",
   autoOpenPlanSidebar: false,
+  backgroundBlur: 0,
+  backgroundImage: "",
+  backgroundOpacity: 0,
   confirmThreadArchive: true,
   confirmThreadDelete: false,
   diffWordWrap: true,
