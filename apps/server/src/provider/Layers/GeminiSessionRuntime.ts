@@ -227,7 +227,7 @@ export const makeGeminiSessionRuntime = (
 
         const args: string[] = [
           "-p",
-          input.text,
+          '""',
           "--output-format",
           "stream-json",
           "--skip-trust",
@@ -262,6 +262,10 @@ export const makeGeminiSessionRuntime = (
           );
 
         yield* Ref.set(activeChildRef, childHandle);
+
+        yield* Stream.make(new TextEncoder().encode(`${input.text}\n`))
+          .pipe(Stream.run(childHandle.stdin as Parameters<typeof Stream.run>[1]))
+          .pipe(Effect.forkIn(runtimeScope));
 
         let stdoutBuffer = "";
 
