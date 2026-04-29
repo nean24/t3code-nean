@@ -46,19 +46,17 @@ describe("appearanceSettings", () => {
     expect(variables["--app-background-blur"]).toBe("0px");
   });
 
-  it("escapes ordinary background paths for CSS url values", () => {
+  it("renders uploaded background images as CSS url values", () => {
     const variables = resolveAppearanceCssVariables({
       appFontPreset: "custom",
       appFontCustomStack: "Inter, sans-serif",
-      backgroundImage: 'C:/Users/nean/Pictures/a "quote".png',
+      backgroundImage: "data:image/png;base64,abc",
       backgroundOpacity: 0.25,
       backgroundBlur: 12,
     });
 
     expect(variables["--app-font-family"]).toBe("Inter, sans-serif");
-    expect(variables["--app-background-image"]).toBe(
-      'url("C:/Users/nean/Pictures/a \\"quote\\".png")',
-    );
+    expect(variables["--app-background-image"]).toBe('url("data:image/png;base64,abc")');
     expect(variables["--app-background-opacity"]).toBe("0.25");
     expect(variables["--app-background-blur"]).toBe("12px");
   });

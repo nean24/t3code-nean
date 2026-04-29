@@ -15,6 +15,7 @@
 - Modify `packages/contracts/src/settings.ts`: add client settings fields, defaults, and patch fields.
 - Add `packages/contracts/src/settings.test.ts`: verify settings defaults and appearance value decoding.
 - Add `apps/web/src/appearanceSettings.ts`: pure font/background resolver and clamp helpers.
+- Add `apps/web/src/backgroundImageUpload.ts`: upload validation, data URL reading, and visible-default patch helper.
 - Add `apps/web/src/appearanceSettings.test.ts`: red-green tests for appearance resolver behavior.
 - Add `apps/web/src/hooks/useAppearanceSettings.ts`: apply resolved settings to CSS variables.
 - Modify `apps/web/src/main.tsx`: mount the appearance settings bridge.
@@ -58,7 +59,7 @@ Expected: pass.
 
 - [ ] **Step 1: Write failing resolver tests**
 
-Cover preset font resolution, custom font fallback, opacity/blur clamps, empty background, and ordinary URL/path background CSS value generation.
+Cover preset font resolution, custom font fallback, opacity/blur clamps, empty background, and uploaded data URL background CSS value generation.
 
 - [ ] **Step 2: Run red test**
 
@@ -102,7 +103,7 @@ Use `--app-font-family` in `body`. Add a fixed `body::before` background-image l
 
 - [ ] **Step 1: Add controls**
 
-Add an Appearance section under Theme with font preset select, custom font input, background image input with clear action, and opacity/blur numeric range controls.
+Add an Appearance section under Theme with font preset select, custom font input, background image upload with clear action, and opacity/blur numeric range controls. The upload control should accept common raster image files, store a FileReader data URL in client settings, reject files larger than 5 MB, and set background strength to a visible default when the current strength is `0`.
 
 - [ ] **Step 2: Add reset labels**
 

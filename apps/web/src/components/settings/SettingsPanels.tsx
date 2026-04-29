@@ -3,13 +3,14 @@ import {
   ArchiveX,
   ChevronDownIcon,
   InfoIcon,
+  ImagePlusIcon,
   LoaderIcon,
   PlusIcon,
   RefreshCwIcon,
   XIcon,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { type ReactNode, useCallback, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type ReactNode, useCallback, useMemo, useRef, useState } from "react";
 import {
   type DesktopUpdateChannel,
   type ScopedThreadRef,
@@ -55,6 +56,11 @@ import {
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
+import {
+  BACKGROUND_IMAGE_ACCEPT,
+  createBackgroundImageUploadPatch,
+  readBackgroundImageFile,
+} from "../../backgroundImageUpload";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
@@ -613,7 +619,9 @@ export function GeneralSettingsPanel() {
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
   >({});
+  const [backgroundImageError, setBackgroundImageError] = useState<string | null>(null);
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
+  const backgroundImageInputRef = useRef<HTMLInputElement | null>(null);
   const refreshingRef = useRef(false);
   const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
   const refreshProviders = useCallback(() => {
@@ -712,6 +720,37 @@ export function GeneralSettingsPanel() {
   const openDiagnosticsError = openPathErrorByTarget.logsDirectory ?? null;
   const isOpeningKeybindings = openingPathByTarget.keybindings;
   const isOpeningLogsDirectory = openingPathByTarget.logsDirectory;
+
+  const selectBackgroundImage = useCallback(() => {
+    backgroundImageInputRef.current?.click();
+  }, []);
+
+  const clearBackgroundImage = useCallback(() => {
+    setBackgroundImageError(null);
+    updateSettings({
+      backgroundImage: DEFAULT_UNIFIED_SETTINGS.backgroundImage,
+    });
+  }, [updateSettings]);
+
+  const handleBackgroundImageFileChange = useCallback(
+    (event: ChangeEvent<HTMLInputElement>) => {
+      const file = event.currentTarget.files?.[0] ?? null;
+      event.currentTarget.value = "";
+      if (!file) return;
+
+      setBackgroundImageError(null);
+      void readBackgroundImageFile(file)
+        .then((dataUrl) => {
+          updateSettings(createBackgroundImageUploadPatch(dataUrl, settings.backgroundOpacity));
+        })
+        .catch((error: unknown) => {
+          setBackgroundImageError(
+            error instanceof Error ? error.message : "Could not read background image.",
+          );
+        });
+    },
+    [settings.backgroundOpacity, updateSettings],
+  );
 
   const addCustomModel = useCallback(
     (provider: ProviderKind) => {
@@ -955,45 +994,42 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           title="Background image"
-          description="Use a local path or URL behind the app without replacing the normal surfaces."
+          description="Upload an image behind the app without replacing the normal surfaces."
+          status={
+            <>
+              <span>{settings.backgroundImage ? "Image selected" : "No image selected"}</span>
+              {backgroundImageError ? (
+                <span className="mt-1 block text-destructive">{backgroundImageError}</span>
+              ) : null}
+            </>
+          }
           resetAction={
             settings.backgroundImage !== DEFAULT_UNIFIED_SETTINGS.backgroundImage ? (
-              <SettingResetButton
-                label="background image"
-                onClick={() =>
-                  updateSettings({
-                    backgroundImage: DEFAULT_UNIFIED_SETTINGS.backgroundImage,
-                  })
-                }
-              />
+              <SettingResetButton label="background image" onClick={clearBackgroundImage} />
             ) : null
           }
           control={
-            settings.backgroundImage ? (
-              <Button
-                size="xs"
-                variant="outline"
-                onClick={() =>
-                  updateSettings({
-                    backgroundImage: DEFAULT_UNIFIED_SETTINGS.backgroundImage,
-                  })
-                }
-              >
-                Clear
+            <>
+              <input
+                ref={backgroundImageInputRef}
+                className="sr-only"
+                type="file"
+                accept={BACKGROUND_IMAGE_ACCEPT}
+                onChange={handleBackgroundImageFileChange}
+                aria-label="Upload background image"
+              />
+              <Button size="xs" variant="outline" onClick={selectBackgroundImage}>
+                <ImagePlusIcon className="size-3.5" />
+                {settings.backgroundImage ? "Replace" : "Upload"}
               </Button>
-            ) : null
+              {settings.backgroundImage ? (
+                <Button size="xs" variant="outline" onClick={clearBackgroundImage}>
+                  Clear
+                </Button>
+              ) : null}
+            </>
           }
-        >
-          <div className="mt-3 pb-4">
-            <Input
-              aria-label="Background image URL or path"
-              value={settings.backgroundImage}
-              onChange={(event) => updateSettings({ backgroundImage: event.target.value })}
-              placeholder="https://example.com/background.jpg or C:/Pictures/background.jpg"
-              spellCheck={false}
-            />
-          </div>
-        </SettingsRow>
+        />
 
         <SettingsRow
           title="Background strength"

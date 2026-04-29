@@ -17,14 +17,14 @@ it("decodes explicit appearance customization settings", () => {
   const settings = Schema.decodeSync(ClientSettingsSchema)({
     appFontPreset: "custom",
     appFontCustomStack: '"Inter", ui-sans-serif, system-ui, sans-serif',
-    backgroundImage: "https://example.com/background.png",
+    backgroundImage: "data:image/png;base64,abc",
     backgroundOpacity: 0.35,
     backgroundBlur: 8,
   });
 
   assert.strictEqual(settings.appFontPreset, "custom");
   assert.strictEqual(settings.appFontCustomStack, '"Inter", ui-sans-serif, system-ui, sans-serif');
-  assert.strictEqual(settings.backgroundImage, "https://example.com/background.png");
+  assert.strictEqual(settings.backgroundImage, "data:image/png;base64,abc");
   assert.strictEqual(settings.backgroundOpacity, 0.35);
   assert.strictEqual(settings.backgroundBlur, 8);
 });
@@ -33,11 +33,11 @@ it("accepts appearance customization client setting patches", () => {
   const patch = Schema.decodeSync(ClientSettingsPatch)({
     appFontPreset: "system",
     appFontCustomStack: "",
-    backgroundImage: "C:/Users/nean/Pictures/bg.png",
+    backgroundImage: "data:image/webp;base64,abc",
     backgroundOpacity: 0.2,
     backgroundBlur: 4,
   });
 
   assert.strictEqual(patch.appFontPreset, "system");
-  assert.strictEqual(patch.backgroundImage, "C:/Users/nean/Pictures/bg.png");
+  assert.strictEqual(patch.backgroundImage, "data:image/webp;base64,abc");
 });
